@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="fr">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'">
+<title>Connexion Instagram · Tasmosta</title>
+<style>
+  body { max-width: 42rem; margin: 3rem auto; padding: 0 1rem; font: 1rem/1.6 system-ui; color: #222; }
+  a, button { display: inline-block; padding: .6rem 1rem; border-radius: .4rem; }
+  a { background: #833ab4; color: white; }
+  textarea { box-sizing: border-box; width: 100%; min-height: 8rem; font: .9rem/1.5 monospace; }
+  button { cursor: pointer; }
+</style>
+<h1>Connexion Instagram</h1>
+<section id="start">
+  <p>Configure d’abord l’identifiant Instagram, le secret personnel et l’URI de retour dans les paramètres de TasmostaInstagram sur l’horloge.</p>
+  <p>Ajoute ce lien à tes favoris, puis exécute-le lorsque tu es sur la page web de ton horloge :</p>
+  <p><a id="bookmark">Connecter Instagram</a></p>
+  <p>Si ton navigateur ne permet pas les favoris JavaScript, colle le code ci-dessous dans sa console sur la page AWTRIX. Il crée une demande liée à cette horloge, puis ouvre Instagram.</p>
+  <label for="script">Code à exécuter sur la page AWTRIX</label>
+  <textarea id="script" readonly></textarea>
+  <p>Ce fichier ne contient aucun identifiant secret. N’exécute ce code que sur ton horloge et sur un réseau de confiance.</p>
+</section>
+<section id="return" hidden>
+  <p>Copie cette URL complète dans <strong>Apps → TasmostaInstagram → ⚙ → URL de retour Instagram</strong> sur ton horloge, puis enregistre. Le script vérifiera la demande avant d’obtenir le jeton.</p>
+  <label for="result">URL de retour Instagram</label>
+  <textarea id="result" readonly></textarea>
+  <p><button id="copy" type="button">Copier l’URL</button> <span id="feedback" role="status"></span></p>
+  <p>Cette URL contient un code temporaire : ne la partage pas. En cas de refus, l’horloge expliquera qu’une nouvelle connexion est nécessaire.</p>
+</section>
+<script>
+async function connectInstagram() {
+  try {
+    if (!['http:', 'https:'].includes(location.protocol)) throw new Error('Exécute ce code sur la page AWTRIX de ton horloge.');
+    const name = prompt('Nom de l’application sur AWTRIX', 'TasmostaInstagram');
+    if (name === null) return;
+    if (!/^[A-Za-z0-9_-]{1,32}$/.test(name)) throw new Error('Nom d’application invalide.');
+    const path = '/api/v1/apps/' + encodeURIComponent(name);
+    async function api(suffix, options) {
+      const response = await fetch(path + suffix, {cache: 'no-store', ...options, signal: AbortSignal.timeout(12000)});
+      if (!response.ok) throw new Error('AWTRIX répond HTTP ' + response.status + '.');
+      try { return await response.json(); }
+      catch (_) { throw new Error('Réponse AWTRIX invalide.'); }
+    }
+    const config = await api('/config');
+    const value = key => config.fields?.find(field => field.key === key)?.value;
+    const appId = value('app_id');
+    const redirect = value('redirect_uri');
+    if (typeof appId !== 'string' || !/^[0-9]{1,32}$/.test(appId)) throw new Error('Configure l’identifiant Instagram sur AWTRIX.');
+    const callback = new URL(redirect);
+    if (callback.protocol !== 'https:' || callback.username || callback.password || callback.search || callback.hash || callback.href !== redirect) throw new Error('Configure une URI de retour HTTPS exacte, sans paramètres ni fragment.');
+    if (!value('app_secret')) throw new Error('Configure ton secret personnel sur AWTRIX.');
+    const state = [...crypto.getRandomValues(new Uint8Array(32))].map(byte => byte.toString(16).padStart(2, '0')).join('');
+    const saved = await api('/data', {method: 'PATCH', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({oauth_pending: {state, app_id: appId, redirect_uri: redirect, created_at: Math.floor(Date.now() / 1000)}})});
+    if (saved?.ok !== true || saved.error !== null) throw new Error('La demande n’a pas pu être enregistrée par le script. Vérifie son état dans AWTRIX.');
+    const url = new URL('https://www.instagram.com/oauth/authorize');
+    url.search = new URLSearchParams({client_id: appId, redirect_uri: redirect, response_type: 'code', scope: 'instagram_business_basic', state}).toString();
+    location.assign(url.href);
+  } catch (error) {
+    // Do not echo API bodies: they may contain saved secrets.
+    alert(error instanceof TypeError ? 'Adresse de retour ou réponse AWTRIX invalide.' : error.message);
+  }
+}
+const code = '(' + connectInstagram.toString() + ')();';
+document.getElementById('bookmark').href = 'javascript:' + encodeURIComponent('void ' + code);
+document.getElementById('script').value = code;
+if (location.search) {
+  document.getElementById('start').hidden = true;
+  document.getElementById('return').hidden = false;
+  document.getElementById('result').value = location.href;
+}
+document.getElementById('copy').onclick = async () => {
+  const result = document.getElementById('result');
+  try {
+    await navigator.clipboard.writeText(result.value);
+    document.getElementById('feedback').textContent = 'URL copiée.';
+  } catch (_) {
+    result.focus(); result.select();
+    document.getElementById('feedback').textContent = 'Sélectionne et copie l’URL.';
+  }
+};
+</script>
+</html>
